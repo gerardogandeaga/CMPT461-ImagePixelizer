@@ -16,6 +16,7 @@ def link_external_packages():
     # set the path if not already set
     if dep_path not in sys.path:
         sys.path.append(dep_path)
+        sys.path.append(os.path.join(pykrita_resource_dir, "my_extension"))
 
 # THIS NEEDS TO BE CALLED BEFORE WE CAN PERFORM ANY OPERATIONS WITH EXTERNAL LIBRARIES 
 link_external_packages()
@@ -24,6 +25,14 @@ from PyQt5.QtWidgets import *
 import numpy as np
 import cv2
 from PIL import Image
+# from .core import pixelizer
+import subprocess
+
+WORKING_DIR = os.path.join(str(Krita.instance().readSetting("", "ResourceDirectory", "")), "pykrita")
+INPUT_IMAGE_PATH   = os.path.join(WORKING_DIR, "my_extension/INPUT_IMAGE.png")
+OUTPUT_IMAGE_PATH  = os.path.join(WORKING_DIR, "my_extension/OUTPUT_IMAGE.png")
+ENGINE_PYTHON_PATH = os.path.join(WORKING_DIR, "deps/bin/python3.9")
+ENGINE_ENTRY_POINT = os.path.join(WORKING_DIR, "my_extension/core/pixelizer.py")
 
 class MyExtension(DockWidget):
     def __init__(self):
@@ -44,31 +53,45 @@ class MyExtension(DockWidget):
     def canvasChanged(self, canvas):
         pass
 
-    def popup(self):
+    def popup(self, message):
         QMessageBox.information(QWidget(), "My Extension Popup", "Numpy Version: {}".format(cv2.__version__))
 
     def convert2cv2(self):
+        # get the current active document opened on krita
         active_doc = Krita.instance().activeDocument()
+
+        # get the active layer with its dimensions
         layer = active_doc.activeNode()
         width = active_doc.width()
         height = active_doc.height()
 
+        # get pixel data from the image
         pixel_data = layer.pixelData(0, 0, width, height)
-        
+
+        # convert pixel data to a PIL image
         mode = "RGBA"
         size = (width, height)
         pil_img = Image.frombytes(mode, size, pixel_data)
 
+        # from PIL to numpy image and save the image to the working directory
         numpy_img = np.array(pil_img, dtype=np.uint8)
+        cv2.imwrite(INPUT_IMAGE_PATH, numpy_img)
 
-        red, blk_wht_img = cv2.threshold(numpy_img, 128, 255, cv2.THRESH_BINARY)
-        result_image = Image.fromarray(blk_wht_img, mode)
+        # fire up the pixelization subprocesses
+        subprocess.Popen([ENGINE_PYTHON_PATH, ENGINE_ENTRY_POINT, WORKING_DIR+"/my_extension", INPUT_IMAGE_PATH, OUTPUT_IMAGE_PATH]).wait()
 
-        result_pixel_data = result_image.tobytes()
+        # # TODO: pass the numpy image into the pixelization and normal functions...
+        # pixelated_im = pixelizer.pilexate_image(numpy_img)
 
-        layer.setPixelData(result_pixel_data, 0, 0, width, height)
+        # new_width, new_height = pixelated_im[1], pixelated_im[0]
 
-        active_doc.refreshProjection()
+        # result_image = Image.fromarray(pixelated_im, mode)
+
+        # result_pixel_data = result_image.tobytes()
+
+        # layer.setPixelData(result_pixel_data, 0, 0, new_width, new_height)
+
+        # active_doc.refreshProjection()
 
 
 

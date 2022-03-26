@@ -2,7 +2,10 @@
 __pycache__
 *.code-workspace
 
+.vscode
+
 # do not commit python virtual environments, instead export a requirments.txt
 # using pip freeze > requirements.txt
 deps/
 venv/
+pyxelate/

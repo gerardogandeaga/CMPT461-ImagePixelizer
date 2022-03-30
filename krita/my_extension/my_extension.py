@@ -1,5 +1,6 @@
 import sys
 import os
+from typing import Tuple
 from krita import *
 
 # API Listing: https://github.com/scottpetrovic/krita-python-auto-complete/blob/master/output/PyKrita.py
@@ -25,38 +26,176 @@ from PyQt5.QtWidgets import *
 import numpy as np
 import cv2
 from PIL import Image
-# from .core import pixelizer
 import subprocess
+import json
 
 WORKING_DIR = os.path.join(str(Krita.instance().readSetting("", "ResourceDirectory", "")), "pykrita")
 INPUT_IMAGE_PATH   = os.path.join(WORKING_DIR, "my_extension/INPUT_IMAGE.png")
 OUTPUT_IMAGE_PATH  = os.path.join(WORKING_DIR, "my_extension/OUTPUT_IMAGE.png")
 ENGINE_PYTHON_PATH = os.path.join(WORKING_DIR, "deps/bin/python3.9")
 ENGINE_ENTRY_POINT = os.path.join(WORKING_DIR, "my_extension/core/pixelizer.py")
+CONFIG_PATH = os.path.join(WORKING_DIR, "my_extension/engine.cfg")
+
+# ==================================== Engine ====================================
+
+IM_MODE = "RGBA"
+class Engine(object):
+    @staticmethod
+    def krita2numpy(pixel_data, size):
+        pil_img = Image.frombytes(IM_MODE, size, pixel_data)
+        return Engine.pil2numpy(pil_img=pil_img)
+
+    @staticmethod
+    def load_img(path):
+        """
+        returns and RGBA image from a specified path
+        """
+        img = cv2.imread(path)
+        return cv2.cvtColor(img, cv2.COLOR_RGB2RGBA)
+
+    @staticmethod
+    def numpy2pil(np_img):
+        return Image.fromarray(np_img, IM_MODE)
+
+    @staticmethod
+    def pil2numpy(pil_img):
+        return np.array(pil_img, dtype=np.uint8)
+
+    @staticmethod 
+    def selection2mask(selection_arr, width, height):
+        """
+        Given a flattened of length = width * height
+        return a numpy mask. selection_arr stores values between 0 and 255.
+        """
+        mask = np.frombuffer(selection_arr, dtype=np.uint8)
+        # reshape mask array to a rectangle
+        mask = mask.reshape(height, width)
+
+        return mask
+
+    @staticmethod
+    def export_config(input_path="", output_pix_path="", output_norm_path="", height=None, width=None, factor=None, upscale=1, depth=1, palette=8, dither="none", sobel=3, svd=True, alpha=.6):
+        """
+        Create a config file for the pixelizer containing the
+        """
+        config_map = {
+            "paths": {
+                "input_path":       input_path,
+                "output_pix_path":  output_pix_path,
+                "output_norm_path": output_norm_path,
+            },
+            "pyxelate": {
+                "height":  height,
+                "width":   width,
+                "factor":  factor,
+                "upscale": upscale,
+                "depth":   depth,
+                "palette": palette,
+                "dither":  dither,
+                "sobel":   sobel,
+                "svd":     svd,
+                "alpha":   alpha
+            }
+        }
+
+        with open(CONFIG_PATH, 'w') as f:
+            json.dump(config_map, f)
+
+    @staticmethod
+    def create_new_documents(pix_img, norm_img, width, height):
+        """
+        Create new documents for the pixelized and normal images
+        """
+
+        # populate the pixelized document
+        if pix_img != None:
+            pix_document = Krita.instance().createDocument(width, height, "Pixelized", "RGBA", "U8", "", 300.0)
+            pix_layer = pix_document.createNode("Pixelized", "paintlayer")
+            pix_document.rootNode().removeChildNode(pix_document.nodeByName("Background"))
+            pix_document.rootNode().addChildNode(pix_layer, None)
+
+            pix_layer.setPixelData(pix_img, 0, 0, width, height)
+            Krita.instance().activeWindow().addView(pix_document)
+            pix_document.refreshProjection()
+
+
+        if norm_img != None:
+            # populate the normal map document
+            norm_document = Krita.instance().createDocument(width, height, "Normal Map", "RGBA", "U8", "", 300.0)
+            norm_layer = norm_document.createNode("Normal Map", "paintlayer")
+            norm_document.rootNode().addChildNode(norm_layer, None)
+
+            pix_layer.setPixelData(norm_img, 0, 0, width, height)
+            Krita.instance().activeWindow().addView(norm_document)
+            norm_document.refreshProjection()
+
+# =================================== Extension ==================================
 
 class MyExtension(DockWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("My Extension")
-        main_widget = QWidget(self)
-        self.setWidget(main_widget)
-
-        # btn_alert = QPushButton("do something else!", main_widget)
-        # btn_alert.clicked.connect(self.popup)
-
-        btn_alter_img = QPushButton("Change the image!", main_widget)
-        btn_alter_img.clicked.connect(self.convert2cv2)
-
-        main_widget.setLayout(QVBoxLayout())
-        main_widget.layout().addWidget(btn_alter_img)
+        
+        self.setup_gui()
 
     def canvasChanged(self, canvas):
         pass
 
     def popup(self, message):
-        QMessageBox.information(QWidget(), "My Extension Popup", "Numpy Version: {}".format(cv2.__version__))
+        QMessageBox.information(QWidget(), "something", message)
 
-    def convert2cv2(self):
+    def setup_gui(self):
+        self.setWindowTitle("Pixelizer and Normal Map Generator")
+        # main view
+        main_widget = QWidget(self)
+        self.setWidget(main_widget)
+        main_widget.setLayout(QVBoxLayout())
+
+        # run engine button
+        btn_run_engine = QPushButton("Generate!", main_widget)
+        btn_run_engine.clicked.connect(self.run_engine)
+        # btn_run_engine.clicked.connect(self.test_func)
+
+        main_widget.layout().addWidget(btn_run_engine)
+
+        # dialog = QProgressDialog()
+        # dialog.setRange(0, 0)
+        # dialog.exec()
+        # progress = QProgressBar()
+        # progress.setFixedHeight(8)
+        # progress.setTextVisible(False)
+        # progress.setVisible(True)
+        # progress.setRange(0,0)
+        # main_widget.layout().addWidget(progress)
+    
+    def test_func(self):
+        selection = Krita.instance().activeDocument().selection()
+
+        if selection == None:
+            # no selection!
+            pass
+        else:
+            # get the pixel data from the selection
+            width, height = selection.width(), selection.height()
+            pixels = selection.pixelData(selection.x(), selection.y(), width, height)
+
+            self.popup("{} {} {} {} {}".format(selection.x(), selection.y(), width, height, len(pixels)))
+
+            # selection.copy(Krita.instance().activeDocument().activeNode())
+            
+            mask = Engine.selection2mask(pixels, width, height)
+
+            cv2.imwrite(INPUT_IMAGE_PATH, mask)
+
+            # self.popup("{}".format(mask[:4]))
+
+    def run_engine(self):
+        Engine.export_config(
+            input_path=INPUT_IMAGE_PATH, 
+            output_pix_path=OUTPUT_IMAGE_PATH,
+            factor=6,
+            palette=12)
+
+        # Engine.create_new_documents(None, None)
         # get the current active document opened on krita
         active_doc = Krita.instance().activeDocument()
 
@@ -69,30 +208,34 @@ class MyExtension(DockWidget):
         pixel_data = layer.pixelData(0, 0, width, height)
 
         # convert pixel data to a PIL image
-        mode = "RGBA"
         size = (width, height)
-        pil_img = Image.frombytes(mode, size, pixel_data)
+        pil_img = Image.frombytes(IM_MODE, size, pixel_data)
 
         # from PIL to numpy image and save the image to the working directory
-        numpy_img = np.array(pil_img, dtype=np.uint8)
+        numpy_img = Engine.pil2numpy(pil_img=pil_img)
         cv2.imwrite(INPUT_IMAGE_PATH, numpy_img)
 
-        # fire up the pixelization subprocesses
-        subprocess.Popen([ENGINE_PYTHON_PATH, ENGINE_ENTRY_POINT, WORKING_DIR+"/my_extension", INPUT_IMAGE_PATH, OUTPUT_IMAGE_PATH]).wait()
+        # fire up the pixelization and normalmap subprocesses
+        subprocess.Popen([
+            ENGINE_PYTHON_PATH,
+            ENGINE_ENTRY_POINT,
+            WORKING_DIR+"/my_extension",
+            CONFIG_PATH]).wait()
 
-        # # TODO: pass the numpy image into the pixelization and normal functions...
-        # pixelated_im = pixelizer.pilexate_image(numpy_img)
+        # the pixelized output file should be saved at OUTPUT_IMAGE_PATH
+        pix_im = Engine.load_img(OUTPUT_IMAGE_PATH)
+        pix_im = cv2.resize(pix_im, dsize=(width, height), interpolation=cv2.INTER_NEAREST)
+        pix_dims = pix_im.shape
+        pix_width, pix_height = pix_dims[1], pix_dims[0]
 
-        # new_width, new_height = pixelated_im[1], pixelated_im[0]
+        # back to a PIL image
+        pix_im = Engine.numpy2pil(pix_im)
 
-        # result_image = Image.fromarray(pixelated_im, mode)
+        # get byte format
+        pix_im_bytes = pix_im.tobytes()
 
-        # result_pixel_data = result_image.tobytes()
-
-        # layer.setPixelData(result_pixel_data, 0, 0, new_width, new_height)
-
-        # active_doc.refreshProjection()
-
+        # create the documents with the generated images
+        Engine.create_new_documents(pix_img=pix_im_bytes, norm_img=None, width=pix_width, height=pix_height)
 
 
 # And add the extension to Krita's list of extensions:

@@ -1,6 +1,7 @@
 import sys
 import os
-from typing import Tuple
+from tabnanny import check
+from threading import Thread
 from krita import *
 
 # API Listing: https://github.com/scottpetrovic/krita-python-auto-complete/blob/master/output/PyKrita.py
@@ -23,6 +24,8 @@ def link_external_packages():
 link_external_packages()
 
 from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+# from PyQt5.QtWidgets import *
 import numpy as np
 import cv2
 from PIL import Image
@@ -31,6 +34,7 @@ import json
 
 WORKING_DIR = os.path.join(str(Krita.instance().readSetting("", "ResourceDirectory", "")), "pykrita")
 INPUT_IMAGE_PATH   = os.path.join(WORKING_DIR, "my_extension/INPUT_IMAGE.png")
+INPUT_MASK_PATH   = os.path.join(WORKING_DIR, "my_extension/INPUT_MASK.png")
 OUTPUT_IMAGE_PATH  = os.path.join(WORKING_DIR, "my_extension/OUTPUT_IMAGE.png")
 ENGINE_PYTHON_PATH = os.path.join(WORKING_DIR, "deps/bin/python3.9")
 ENGINE_ENTRY_POINT = os.path.join(WORKING_DIR, "my_extension/core/pixelizer.py")
@@ -50,7 +54,7 @@ class Engine(object):
         """
         returns and RGBA image from a specified path
         """
-        img = cv2.imread(path)
+        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
         return cv2.cvtColor(img, cv2.COLOR_RGB2RGBA)
 
     @staticmethod
@@ -68,21 +72,29 @@ class Engine(object):
         return a numpy mask. selection_arr stores values between 0 and 255.
         """
         mask = np.frombuffer(selection_arr, dtype=np.uint8)
+        mask = (mask > 0).astype(np.uint8) * 255;
         # reshape mask array to a rectangle
         mask = mask.reshape(height, width)
 
         return mask
 
     @staticmethod
-    def export_config(input_path="", output_pix_path="", output_norm_path="", height=None, width=None, factor=None, upscale=1, depth=1, palette=8, dither="none", sobel=3, svd=True, alpha=.6):
+    def export_config(input_path="", input_mask="", output_pix_path="", output_norm_path="", mask_region=None, height=None, width=None, factor=None, upscale=1, depth=1, palette=8, dither="none", sobel=3, svd=True, alpha=.6):
         """
         Create a config file for the pixelizer containing the
         """
         config_map = {
             "paths": {
                 "input_path":       input_path,
+                "input_mask":       input_mask,
                 "output_pix_path":  output_pix_path,
                 "output_norm_path": output_norm_path,
+            },
+            "mask_region": {
+                "x": mask_region[0],
+                "y": mask_region[1],
+                "w": mask_region[2],
+                "h": mask_region[3],
             },
             "pyxelate": {
                 "height":  height,
@@ -134,7 +146,6 @@ class Engine(object):
 class MyExtension(DockWidget):
     def __init__(self):
         super().__init__()
-        
         self.setup_gui()
 
     def canvasChanged(self, canvas):
@@ -148,83 +159,177 @@ class MyExtension(DockWidget):
         # main view
         main_widget = QWidget(self)
         self.setWidget(main_widget)
-        main_widget.setLayout(QVBoxLayout())
+        # form layout
+        pix_form_layout = QFormLayout()
+        main_widget.setLayout(pix_form_layout)
 
         # run engine button
-        btn_run_engine = QPushButton("Generate!", main_widget)
-        btn_run_engine.clicked.connect(self.run_engine)
+        self.btn_run_engine = QPushButton("Generate!", main_widget)
+        self.btn_run_engine.setToolTip("Generate the pixel image and normal map!")
+        self.btn_run_engine.clicked.connect(self.run_engine)
         # btn_run_engine.clicked.connect(self.test_func)
 
-        main_widget.layout().addWidget(btn_run_engine)
+        # ================ Pixelate Inputs ================ #
+        # Scale factor
+        self.input_scale = QLineEdit()
+        self.input_scale.setValidator(QIntValidator(bottom=1, top=20))
+        self.input_scale.setMaxLength(2)
+        self.input_scale.setText("4")
+        # Number of colors
+        self.input_palette_size = QLineEdit()
+        self.input_palette_size.setValidator(QIntValidator(bottom=1))
+        self.input_palette_size.setMaxLength(3)
+        self.input_palette_size.setText("12")
+        # Dither
+        self.input_dither = QComboBox()
+        self.input_dither.addItems([
+            "none",
+            "naive",
+            "bayer",
+            "floyd",
+            "atkinson"
+        ])
+        self.input_dither.setInsertPolicy(QComboBox.NoInsert)
+        # scale output checkbox
+        self.scale_checkbox = QCheckBox("")
+        self.scale_checkbox.setChecked(False)
 
-        # dialog = QProgressDialog()
-        # dialog.setRange(0, 0)
-        # dialog.exec()
-        # progress = QProgressBar()
-        # progress.setFixedHeight(8)
-        # progress.setTextVisible(False)
-        # progress.setVisible(True)
-        # progress.setRange(0,0)
-        # main_widget.layout().addWidget(progress)
-    
+        # progress bart
+        self.loading_bar = QProgressBar()
+        self.loading_bar.setFixedHeight(12)
+        self.loading_bar.setTextVisible(False)
+        self.loading_bar.setVisible(False)
+        self.loading_bar.setRange(0,0)
+
+        # add the widgets to the form
+        pix_form_layout.addRow("Scale factor", self.input_scale)
+        pix_form_layout.addRow("Palette size", self.input_palette_size)
+        pix_form_layout.addRow("Dither mode", self.input_dither)
+        pix_form_layout.addRow("Rescale output?", self.scale_checkbox)
+        pix_form_layout.addRow(self.loading_bar)
+        pix_form_layout.addRow(self.btn_run_engine)
+
+        # color = QColorDialog.getColor()
+
     def test_func(self):
-        selection = Krita.instance().activeDocument().selection()
+        active_doc = Krita.instance().activeDocument()
+        # get the active layer with its dimensions
+        layer = active_doc.activeNode()
+        doc_width = active_doc.width()
+        doc_height = active_doc.height()
 
+        # save the selection mask
+        selection = Krita.instance().activeDocument().selection()
+        mask = np.zeros((doc_height, doc_width), dtype=np.uint8)
         if selection == None:
             # no selection!
-            pass
+            # self.popup("{} {} {} {} {}".format(selection.x(), selection.y(), doc_width, doc_height, len(pixels)))
+            # take the full image
+            mask = mask + 255
         else:
             # get the pixel data from the selection
-            width, height = selection.width(), selection.height()
-            pixels = selection.pixelData(selection.x(), selection.y(), width, height)
+            mask_x, mask_y = selection.x(), selection.y()
+            mask_width, mask_height = selection.width(), selection.height()
+            pixels = selection.pixelData(mask_x, mask_y, mask_width, mask_height)
+            # create and save the binary mask
+            obj_mask = Engine.selection2mask(pixels, mask_width, mask_height)
+            mask[mask_y:mask_y+mask_height, mask_x:mask_x+mask_width] = obj_mask
+        cv2.imwrite(INPUT_IMAGE_PATH, mask)
 
-            self.popup("{} {} {} {} {}".format(selection.x(), selection.y(), width, height, len(pixels)))
+    def get_input_values(self):
+        return {
+            "factor": int(self.input_scale.text()),
+            "palette": int(self.input_palette_size.text()),
+            "dither": self.input_dither.currentText()
+        }
 
-            # selection.copy(Krita.instance().activeDocument().activeNode())
-            
-            mask = Engine.selection2mask(pixels, width, height)
-
-            cv2.imwrite(INPUT_IMAGE_PATH, mask)
-
-            # self.popup("{}".format(mask[:4]))
+    def error_popup(self, message: str):
+        msg_popup = QMessageBox()
+        msg_popup.setIcon(QMessageBox.Critical)
+        msg_popup.setText("There was an issue...")
+        msg_popup.setInformativeText(message)
+        msg_popup.setStandardButtons(QMessageBox.Ok)
+        msg_popup.exec()
 
     def run_engine(self):
-        Engine.export_config(
-            input_path=INPUT_IMAGE_PATH, 
-            output_pix_path=OUTPUT_IMAGE_PATH,
-            factor=6,
-            palette=12)
+        rescale_output = self.scale_checkbox.isChecked()
+
+        input_values = self.get_input_values()
 
         # Engine.create_new_documents(None, None)
         # get the current active document opened on krita
         active_doc = Krita.instance().activeDocument()
 
+        if active_doc == None:
+            self.error_popup("An image has not been loaded yet!")
+            return
+
         # get the active layer with its dimensions
         layer = active_doc.activeNode()
-        width = active_doc.width()
-        height = active_doc.height()
+        doc_width = active_doc.width()
+        doc_height = active_doc.height()
 
         # get pixel data from the image
-        pixel_data = layer.pixelData(0, 0, width, height)
+        pixel_data = layer.pixelData(0, 0, doc_width, doc_height)
 
         # convert pixel data to a PIL image
-        size = (width, height)
+        size = (doc_width, doc_height)
         pil_img = Image.frombytes(IM_MODE, size, pixel_data)
 
         # from PIL to numpy image and save the image to the working directory
         numpy_img = Engine.pil2numpy(pil_img=pil_img)
         cv2.imwrite(INPUT_IMAGE_PATH, numpy_img)
 
+        # save the selection mask
+        selection = Krita.instance().activeDocument().selection()
+        mask = np.zeros((doc_height, doc_width), dtype=np.uint8)
+        mask_x, mask_y, mask_width, mask_height = 0, 0, doc_width, doc_height
+        if selection == None:
+            # no selection!
+            # self.popup("{} {} {} {} {}".format(selection.x(), selection.y(), doc_width, doc_height, len(pixels)))
+            # take the full image
+            mask = mask + 255
+        else:
+            # get the pixel data from the selection
+            mask_x, mask_y = selection.x(), selection.y()
+            mask_width, mask_height = selection.width(), selection.height()
+            pixels = selection.pixelData(mask_x, mask_y, mask_width, mask_height)
+            # create and save the binary mask
+            obj_mask = Engine.selection2mask(pixels, mask_width, mask_height)
+            mask[mask_y:mask_y+mask_height, mask_x:mask_x+mask_width] = obj_mask
+        cv2.imwrite(INPUT_MASK_PATH, mask)
+
+        self.loading_bar.setVisible(True) # set the loading bar to show
+        self.btn_run_engine.setEnabled(False)
+        
+        # export the config file
+        Engine.export_config(
+            input_path=INPUT_IMAGE_PATH,
+            input_mask=INPUT_MASK_PATH,
+            output_pix_path=OUTPUT_IMAGE_PATH,
+            mask_region=(mask_x, mask_y, mask_width, mask_height),
+            factor=input_values["factor"],
+            palette=input_values["palette"],
+            dither=input_values["dither"])
         # fire up the pixelization and normalmap subprocesses
-        subprocess.Popen([
+        engine_process = subprocess.Popen([
             ENGINE_PYTHON_PATH,
             ENGINE_ENTRY_POINT,
             WORKING_DIR+"/my_extension",
-            CONFIG_PATH]).wait()
+            CONFIG_PATH])
+
+        # poll on the subprocess and update the UI
+        while engine_process.poll() is None:
+            QApplication.processEvents()
 
         # the pixelized output file should be saved at OUTPUT_IMAGE_PATH
         pix_im = Engine.load_img(OUTPUT_IMAGE_PATH)
-        pix_im = cv2.resize(pix_im, dsize=(width, height), interpolation=cv2.INTER_NEAREST)
+
+        if rescale_output:
+            # scale image back to the original scale
+            pix_im = cv2.resize(pix_im, dsize=(
+                pix_im.shape[1] * input_values["factor"], pix_im.shape[0] * input_values["factor"]), 
+                interpolation=cv2.INTER_NEAREST)
         pix_dims = pix_im.shape
         pix_width, pix_height = pix_dims[1], pix_dims[0]
 
@@ -236,6 +341,9 @@ class MyExtension(DockWidget):
 
         # create the documents with the generated images
         Engine.create_new_documents(pix_img=pix_im_bytes, norm_img=None, width=pix_width, height=pix_height)
+
+        self.loading_bar.setVisible(False) # set the loading bar to not show
+        self.btn_run_engine.setEnabled(True)
 
 
 # And add the extension to Krita's list of extensions:

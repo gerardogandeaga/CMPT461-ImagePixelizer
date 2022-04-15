@@ -1,7 +1,5 @@
 import sys
 import os
-from tabnanny import check
-from threading import Thread
 from krita import *
 
 # API Listing: https://github.com/scottpetrovic/krita-python-auto-complete/blob/master/output/PyKrita.py
@@ -25,122 +23,29 @@ link_external_packages()
 
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
-# from PyQt5.QtWidgets import *
 import numpy as np
 import cv2
 from PIL import Image
 import subprocess
 import json
+from palette import PaletteGrid
+
+from engine import Engine
 
 WORKING_DIR = os.path.join(str(Krita.instance().readSetting("", "ResourceDirectory", "")), "pykrita")
+XTC_PATH = os.path.join(WORKING_DIR, "my_extension/core/xt_consistency/")
+# images
 INPUT_IMAGE_PATH   = os.path.join(WORKING_DIR, "my_extension/INPUT_IMAGE.png")
 INPUT_MASK_PATH   = os.path.join(WORKING_DIR, "my_extension/INPUT_MASK.png")
 OUTPUT_IMAGE_PATH  = os.path.join(WORKING_DIR, "my_extension/OUTPUT_IMAGE.png")
+OUTPUT_NORMAL_PATH  = os.path.join(WORKING_DIR, "my_extension/OUTPUT_NORMAL.png")
+# engine runner files
 ENGINE_PYTHON_PATH = os.path.join(WORKING_DIR, "deps/bin/python3.9")
-ENGINE_ENTRY_POINT = os.path.join(WORKING_DIR, "my_extension/core/pixelizer.py")
+PIXELIZER_ENTRY_POINT = os.path.join(WORKING_DIR, "my_extension/core/pixelizer.py")
+NORMALGEN_ENTRY_POINT = os.path.join(WORKING_DIR, "my_extension/core/normal_gen.py")
 CONFIG_PATH = os.path.join(WORKING_DIR, "my_extension/engine.cfg")
 
-# ==================================== Engine ====================================
-
 IM_MODE = "RGBA"
-class Engine(object):
-    @staticmethod
-    def krita2numpy(pixel_data, size):
-        pil_img = Image.frombytes(IM_MODE, size, pixel_data)
-        return Engine.pil2numpy(pil_img=pil_img)
-
-    @staticmethod
-    def load_img(path):
-        """
-        returns and RGBA image from a specified path
-        """
-        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-        return cv2.cvtColor(img, cv2.COLOR_RGB2RGBA)
-
-    @staticmethod
-    def numpy2pil(np_img):
-        return Image.fromarray(np_img, IM_MODE)
-
-    @staticmethod
-    def pil2numpy(pil_img):
-        return np.array(pil_img, dtype=np.uint8)
-
-    @staticmethod 
-    def selection2mask(selection_arr, width, height):
-        """
-        Given a flattened of length = width * height
-        return a numpy mask. selection_arr stores values between 0 and 255.
-        """
-        mask = np.frombuffer(selection_arr, dtype=np.uint8)
-        mask = (mask > 0).astype(np.uint8) * 255;
-        # reshape mask array to a rectangle
-        mask = mask.reshape(height, width)
-
-        return mask
-
-    @staticmethod
-    def export_config(input_path="", input_mask="", output_pix_path="", output_norm_path="", mask_region=None, height=None, width=None, factor=None, upscale=1, depth=1, palette=8, dither="none", sobel=3, svd=True, alpha=.6):
-        """
-        Create a config file for the pixelizer containing the
-        """
-        config_map = {
-            "paths": {
-                "input_path":       input_path,
-                "input_mask":       input_mask,
-                "output_pix_path":  output_pix_path,
-                "output_norm_path": output_norm_path,
-            },
-            "mask_region": {
-                "x": mask_region[0],
-                "y": mask_region[1],
-                "w": mask_region[2],
-                "h": mask_region[3],
-            },
-            "pyxelate": {
-                "height":  height,
-                "width":   width,
-                "factor":  factor,
-                "upscale": upscale,
-                "depth":   depth,
-                "palette": palette,
-                "dither":  dither,
-                "sobel":   sobel,
-                "svd":     svd,
-                "alpha":   alpha
-            }
-        }
-
-        with open(CONFIG_PATH, 'w') as f:
-            json.dump(config_map, f)
-
-    @staticmethod
-    def create_new_documents(pix_img, norm_img, width, height):
-        """
-        Create new documents for the pixelized and normal images
-        """
-
-        # populate the pixelized document
-        if pix_img != None:
-            pix_document = Krita.instance().createDocument(width, height, "Pixelized", "RGBA", "U8", "", 300.0)
-            pix_layer = pix_document.createNode("Pixelized", "paintlayer")
-            pix_document.rootNode().removeChildNode(pix_document.nodeByName("Background"))
-            pix_document.rootNode().addChildNode(pix_layer, None)
-
-            pix_layer.setPixelData(pix_img, 0, 0, width, height)
-            Krita.instance().activeWindow().addView(pix_document)
-            pix_document.refreshProjection()
-
-
-        if norm_img != None:
-            # populate the normal map document
-            norm_document = Krita.instance().createDocument(width, height, "Normal Map", "RGBA", "U8", "", 300.0)
-            norm_layer = norm_document.createNode("Normal Map", "paintlayer")
-            norm_document.rootNode().addChildNode(norm_layer, None)
-
-            pix_layer.setPixelData(norm_img, 0, 0, width, height)
-            Krita.instance().activeWindow().addView(norm_document)
-            norm_document.refreshProjection()
-
 # =================================== Extension ==================================
 
 class MyExtension(DockWidget):
@@ -160,8 +65,8 @@ class MyExtension(DockWidget):
         main_widget = QWidget(self)
         self.setWidget(main_widget)
         # form layout
-        pix_form_layout = QFormLayout()
-        main_widget.setLayout(pix_form_layout)
+        self.pix_form_layout = QFormLayout()
+        main_widget.setLayout(self.pix_form_layout)
 
         # run engine button
         self.btn_run_engine = QPushButton("Generate!", main_widget)
@@ -202,14 +107,12 @@ class MyExtension(DockWidget):
         self.loading_bar.setRange(0,0)
 
         # add the widgets to the form
-        pix_form_layout.addRow("Scale factor", self.input_scale)
-        pix_form_layout.addRow("Palette size", self.input_palette_size)
-        pix_form_layout.addRow("Dither mode", self.input_dither)
-        pix_form_layout.addRow("Rescale output?", self.scale_checkbox)
-        pix_form_layout.addRow(self.loading_bar)
-        pix_form_layout.addRow(self.btn_run_engine)
-
-        # color = QColorDialog.getColor()
+        self.pix_form_layout.addRow("Scale factor", self.input_scale)
+        self.pix_form_layout.addRow("Palette size", self.input_palette_size)
+        self.pix_form_layout.addRow("Dither mode", self.input_dither)
+        self.pix_form_layout.addRow("Rescale output?", self.scale_checkbox)
+        self.pix_form_layout.addRow(self.loading_bar)
+        self.pix_form_layout.addRow(self.btn_run_engine)
 
     def test_func(self):
         active_doc = Krita.instance().activeDocument()
@@ -250,6 +153,24 @@ class MyExtension(DockWidget):
         msg_popup.setInformativeText(message)
         msg_popup.setStandardButtons(QMessageBox.Ok)
         msg_popup.exec()
+    
+    def show_colour_palette(self, img):
+        # rgb image to hex
+        img_hex = np.asarray(img, dtype=np.uint32)
+        img_hex = ((img_hex[:,:,0]<<16) + (img_hex[:,:,1]<<8) + img_hex[:,:,2])
+
+        # find unique colours and assign the hex string
+        palette = np.unique(img_hex.reshape(-1, img_hex.shape[-1]))
+        palette = palette.tolist()
+        for i in range(len(palette)):
+            c_str = str(hex(palette[i]))
+            c_str = "#" + c_str[2:]
+            if len(c_str) < 8:
+                c_str += "000000"[:8-len(c_str)-1]
+            palette[i] = c_str
+
+        palette_grid = PaletteGrid(palette)
+        self.pix_form_layout.addRow(palette_grid)
 
     def run_engine(self):
         rescale_output = self.scale_checkbox.isChecked()
@@ -307,19 +228,32 @@ class MyExtension(DockWidget):
             input_path=INPUT_IMAGE_PATH,
             input_mask=INPUT_MASK_PATH,
             output_pix_path=OUTPUT_IMAGE_PATH,
+            output_norm_path=OUTPUT_NORMAL_PATH,
+            xtc_path=XTC_PATH,
             mask_region=(mask_x, mask_y, mask_width, mask_height),
             factor=input_values["factor"],
             palette=input_values["palette"],
             dither=input_values["dither"])
         # fire up the pixelization and normalmap subprocesses
-        engine_process = subprocess.Popen([
+        # normal map generator
+        # normal_process = subprocess.Popen([
+        #     "deps/bin/python3.9", 
+        #     "my_extension/caller.py"], cwd=WORKING_DIR)
+        normal_process = subprocess.Popen([
             ENGINE_PYTHON_PATH,
-            ENGINE_ENTRY_POINT,
+            NORMALGEN_ENTRY_POINT,
+            WORKING_DIR+"/my_extension",
+            CONFIG_PATH])
+
+        # image pixelizer
+        pixelizer_process = subprocess.Popen([
+            ENGINE_PYTHON_PATH,
+            PIXELIZER_ENTRY_POINT,
             WORKING_DIR+"/my_extension",
             CONFIG_PATH])
 
         # poll on the subprocess and update the UI
-        while engine_process.poll() is None:
+        while (pixelizer_process.poll() is None) or (normal_process.poll() is None):
             QApplication.processEvents()
 
         # the pixelized output file should be saved at OUTPUT_IMAGE_PATH
@@ -333,6 +267,8 @@ class MyExtension(DockWidget):
         pix_dims = pix_im.shape
         pix_width, pix_height = pix_dims[1], pix_dims[0]
 
+        self.show_colour_palette(pix_im)
+
         # back to a PIL image
         pix_im = Engine.numpy2pil(pix_im)
 
@@ -341,6 +277,7 @@ class MyExtension(DockWidget):
 
         # create the documents with the generated images
         Engine.create_new_documents(pix_img=pix_im_bytes, norm_img=None, width=pix_width, height=pix_height)
+
 
         self.loading_bar.setVisible(False) # set the loading bar to not show
         self.btn_run_engine.setEnabled(True)

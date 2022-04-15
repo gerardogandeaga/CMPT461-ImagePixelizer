@@ -1,20 +1,12 @@
-# from numpy import ndarray
-# import numpy as np
-# import cv2
-
 import sys
 import json
 
 # when the entry point is invoked then we have to have the following arguments!
 WORKING_DIR = sys.argv[1]
 CONFIG_PATH = sys.argv[2]
-# INPUT_IMAGE_PATH = sys.argv[2]
-# OUTPUT_IMAGE_PATH = sys.argv[3]
-# TODO: add normals paths
 
 import cv2
 import numpy as np
-# from skimage import io
 
 try:
 	from pyxelatecore import Pyx, Pal

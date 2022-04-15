@@ -106,6 +106,10 @@ class MyExtension(DockWidget):
         self.input_norm_palette_size.setMaxLength(3)
         self.input_norm_palette_size.setText("16")
 
+        # generate normal map checkbox
+        self.gen_norm_checkbox = QCheckBox("")
+        self.gen_norm_checkbox.setChecked(True)
+
         # progress bart
         self.loading_bar = QProgressBar()
         self.loading_bar.setFixedHeight(12)
@@ -119,6 +123,7 @@ class MyExtension(DockWidget):
         self.pix_form_layout.addRow("Dither mode", self.input_dither)
         self.pix_form_layout.addRow("Rescale output?", self.scale_checkbox)
         self.pix_form_layout.addRow("# of colours in normal map", self.input_norm_palette_size)
+        self.pix_form_layout.addRow("Generate normals?", self.gen_norm_checkbox)
         self.pix_form_layout.addRow(self.loading_bar)
         self.pix_form_layout.addRow(self.btn_run_engine)
 
@@ -183,6 +188,7 @@ class MyExtension(DockWidget):
 
     def run_engine(self):
         rescale_output = self.scale_checkbox.isChecked()
+        generate_normals = self.gen_norm_checkbox.isChecked()
 
         input_values = self.get_input_values()
 
@@ -243,12 +249,14 @@ class MyExtension(DockWidget):
             factor=input_values["factor"],
             palette=input_values["palette"],
             dither=input_values["dither"])
+
         # fire up the pixelization and normalmap subprocesses
-        normal_process = subprocess.Popen([
-            ENGINE_PYTHON_PATH,
-            NORMALGEN_ENTRY_POINT,
-            WORKING_DIR+"/my_extension",
-            CONFIG_PATH])
+        if generate_normals:
+            normal_process = subprocess.Popen([
+                ENGINE_PYTHON_PATH,
+                NORMALGEN_ENTRY_POINT,
+                WORKING_DIR+"/my_extension",
+                CONFIG_PATH])
         pixelizer_process = subprocess.Popen([
             ENGINE_PYTHON_PATH,
             PIXELIZER_ENTRY_POINT,
@@ -256,12 +264,15 @@ class MyExtension(DockWidget):
             CONFIG_PATH])
 
         # poll on the subprocess and update the UI
-        while (pixelizer_process.poll() is None) or (normal_process.poll() is None):
-            QApplication.processEvents()
+        if generate_normals:
+            while (pixelizer_process.poll() is None) or (normal_process.poll() is None):
+                QApplication.processEvents()
+        else:
+            while pixelizer_process.poll() is None:
+                QApplication.processEvents()
 
         # the pixelized output file should be saved at OUTPUT_IMAGE_PATH
         pix_im = Engine.load_img(OUTPUT_IMAGE_PATH)
-        pix_norm_im = Engine.load_img(OUTPUT_NORMAL_PATH)
 
         # scale the pixelized image
         if rescale_output:
@@ -271,24 +282,30 @@ class MyExtension(DockWidget):
                 interpolation=cv2.INTER_NEAREST)
         pix_dims = pix_im.shape
         pix_width, pix_height = pix_dims[1], pix_dims[0]
-
-        # scale the normal image according to the pixelized image
-        # they should match!
-        if pix_norm_im.shape != pix_dims:
-            pix_norm_im = cv2.resize(pix_norm_im, dsize=(pix_dims[1], pix_dims[0]), interpolation=cv2.INTER_NEAREST)
-
-        # self.show_colour_palette(pix_im)
-
         # back to a PIL image
-        pix_im = Engine.numpy2pil(pix_im)
-        pix_norm_im = Engine.numpy2pil(pix_norm_im)
-
+        pix_im_pil = Engine.numpy2pil(pix_im)
         # get byte format
-        pix_im_bytes = pix_im.tobytes()
-        pix_norm_im_bytes = pix_norm_im.tobytes()
+        pix_im_bytes = pix_im_pil.tobytes()
+
+        # load the normal map is user specified
+        pix_norm_im_bytes = None
+        if generate_normals:
+            pix_norm_im = Engine.load_img(OUTPUT_NORMAL_PATH)
+            # scale the normal image according to the pixelized image
+            # they should match!
+            if pix_norm_im.shape != pix_dims:
+                pix_norm_im = cv2.resize(pix_norm_im, dsize=(pix_dims[1], pix_dims[0]), interpolation=cv2.INTER_NEAREST)
+            # back to a PIL image
+            pix_norm_im_pil = Engine.numpy2pil(pix_norm_im)
+            # get byte format
+            pix_norm_im_bytes = pix_norm_im_pil.tobytes()
 
         # create the documents with the generated images
-        Engine.create_new_documents(pix_img=pix_im_bytes, norm_img=pix_norm_im_bytes, width=pix_width, height=pix_height)
+        Engine.create_new_documents(
+            pix_img=pix_im_bytes, 
+            norm_img=pix_norm_im_bytes, 
+            width=pix_width, 
+            height=pix_height)
 
         self.loading_bar.setVisible(False) # set the loading bar to not show
         self.btn_run_engine.setEnabled(True)

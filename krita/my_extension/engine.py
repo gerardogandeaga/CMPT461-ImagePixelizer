@@ -55,7 +55,7 @@ class Engine(object):
     @staticmethod
     def export_config(
 		input_path="", input_mask="", output_pix_path="", output_norm_path="", 
-		xtc_path="",
+		xtc_path="", norm_scale_factor=4, norm_palette_size = 18,
 		mask_region=None, 
 		height=None, width=None, factor=None, upscale=1, depth=1, palette=8, dither="none", sobel=3, svd=True, alpha=.6):
         """
@@ -86,6 +86,10 @@ class Engine(object):
                 "sobel":   sobel,
                 "svd":     svd,
                 "alpha":   alpha
+            },
+            "normal_gen": {
+                "factor":  norm_scale_factor,
+                "palette": norm_palette_size,
             }
         }
 
@@ -116,6 +120,6 @@ class Engine(object):
             norm_layer = norm_document.createNode("Normal Map", "paintlayer")
             norm_document.rootNode().addChildNode(norm_layer, None)
 
-            pix_layer.setPixelData(norm_img, 0, 0, width, height)
+            norm_layer.setPixelData(norm_img, 0, 0, width, height)
             Krita.instance().activeWindow().addView(norm_document)
             norm_document.refreshProjection()

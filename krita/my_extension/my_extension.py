@@ -99,6 +99,13 @@ class MyExtension(DockWidget):
         self.scale_checkbox = QCheckBox("")
         self.scale_checkbox.setChecked(False)
 
+        # normal generator params
+        # Number of colors in normal map
+        self.input_norm_palette_size = QLineEdit()
+        self.input_norm_palette_size.setValidator(QIntValidator(bottom=1))
+        self.input_norm_palette_size.setMaxLength(3)
+        self.input_norm_palette_size.setText("16")
+
         # progress bart
         self.loading_bar = QProgressBar()
         self.loading_bar.setFixedHeight(12)
@@ -111,6 +118,7 @@ class MyExtension(DockWidget):
         self.pix_form_layout.addRow("Palette size", self.input_palette_size)
         self.pix_form_layout.addRow("Dither mode", self.input_dither)
         self.pix_form_layout.addRow("Rescale output?", self.scale_checkbox)
+        self.pix_form_layout.addRow("# of colours in normal map", self.input_norm_palette_size)
         self.pix_form_layout.addRow(self.loading_bar)
         self.pix_form_layout.addRow(self.btn_run_engine)
 
@@ -143,7 +151,8 @@ class MyExtension(DockWidget):
         return {
             "factor": int(self.input_scale.text()),
             "palette": int(self.input_palette_size.text()),
-            "dither": self.input_dither.currentText()
+            "dither": self.input_dither.currentText(),
+            "norm_palette": int(self.input_palette_size.text()),
         }
 
     def error_popup(self, message: str):
@@ -177,7 +186,6 @@ class MyExtension(DockWidget):
 
         input_values = self.get_input_values()
 
-        # Engine.create_new_documents(None, None)
         # get the current active document opened on krita
         active_doc = Krita.instance().activeDocument()
 
@@ -230,22 +238,17 @@ class MyExtension(DockWidget):
             output_pix_path=OUTPUT_IMAGE_PATH,
             output_norm_path=OUTPUT_NORMAL_PATH,
             xtc_path=XTC_PATH,
+            norm_palette_size=input_values["norm_palette"],
             mask_region=(mask_x, mask_y, mask_width, mask_height),
             factor=input_values["factor"],
             palette=input_values["palette"],
             dither=input_values["dither"])
         # fire up the pixelization and normalmap subprocesses
-        # normal map generator
-        # normal_process = subprocess.Popen([
-        #     "deps/bin/python3.9", 
-        #     "my_extension/caller.py"], cwd=WORKING_DIR)
         normal_process = subprocess.Popen([
             ENGINE_PYTHON_PATH,
             NORMALGEN_ENTRY_POINT,
             WORKING_DIR+"/my_extension",
             CONFIG_PATH])
-
-        # image pixelizer
         pixelizer_process = subprocess.Popen([
             ENGINE_PYTHON_PATH,
             PIXELIZER_ENTRY_POINT,
@@ -258,7 +261,9 @@ class MyExtension(DockWidget):
 
         # the pixelized output file should be saved at OUTPUT_IMAGE_PATH
         pix_im = Engine.load_img(OUTPUT_IMAGE_PATH)
+        pix_norm_im = Engine.load_img(OUTPUT_NORMAL_PATH)
 
+        # scale the pixelized image
         if rescale_output:
             # scale image back to the original scale
             pix_im = cv2.resize(pix_im, dsize=(
@@ -267,17 +272,23 @@ class MyExtension(DockWidget):
         pix_dims = pix_im.shape
         pix_width, pix_height = pix_dims[1], pix_dims[0]
 
-        self.show_colour_palette(pix_im)
+        # scale the normal image according to the pixelized image
+        # they should match!
+        if pix_norm_im.shape != pix_dims:
+            pix_norm_im = cv2.resize(pix_norm_im, dsize=(pix_dims[1], pix_dims[0]), interpolation=cv2.INTER_NEAREST)
+
+        # self.show_colour_palette(pix_im)
 
         # back to a PIL image
         pix_im = Engine.numpy2pil(pix_im)
+        pix_norm_im = Engine.numpy2pil(pix_norm_im)
 
         # get byte format
         pix_im_bytes = pix_im.tobytes()
+        pix_norm_im_bytes = pix_norm_im.tobytes()
 
         # create the documents with the generated images
-        Engine.create_new_documents(pix_img=pix_im_bytes, norm_img=None, width=pix_width, height=pix_height)
-
+        Engine.create_new_documents(pix_img=pix_im_bytes, norm_img=pix_norm_im_bytes, width=pix_width, height=pix_height)
 
         self.loading_bar.setVisible(False) # set the loading bar to not show
         self.btn_run_engine.setEnabled(True)

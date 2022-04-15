@@ -2,9 +2,9 @@
 raw
 __pycache__/*
 sftp-config*.json
-# models
+models
 processed
-# *.pth
+*.pth
 *.tar
 output
 *.gz

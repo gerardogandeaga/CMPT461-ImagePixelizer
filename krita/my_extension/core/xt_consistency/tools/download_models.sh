@@ -1,5 +1,4 @@
 ##!/usr/bin/env zsh
 
-wget https://drive.switch.ch/index.php/s/QPvImzbbdjBKI5P/download
-unzip download
-rm download
+
+wget -O rgb2normal_consistency.pth https://www.dropbox.com/s/6yu48alcava3pcx/rgb2normal_consistency.pth?dl=1

@@ -135,14 +135,6 @@ def mask_and_crop(pix_normal_img, mask_img, mask_region, scale_factor):
 	x, y, w, h = mask_region["x"] // scale_factor, mask_region["y"] // scale_factor, mask_region["w"] // scale_factor, mask_region["h"] // scale_factor
 	return pix_normal_img[y:y+h, x:x+w, :]
 
-def fix_artifacts(pix_normal_img, mask_img):
-	"""
-	tries to remove the weird dark values the pixelization process creates.
-
-	you'll probably need to scale the mask_img to the pix_norm_img if you use the mask
-	"""
-	return pix_normal_img
-
 def main():
 	try:
 		cfg = None
@@ -156,12 +148,14 @@ def main():
 		normal_img = generate_normals(Image.fromarray(img), paths["xtc_path"], paths["output_norm_path"])
 		normal_img = process_normals(normal_img, original_dims, mask_img)
 		pix_normal_img = pixelate_normals(normal_img, mask_img, cfg["pyxelate"]["factor"], cfg["normal_gen"]["palette"])
+
+		# fixing red channel
+		pix_normal_img[:,:,2] = 255 - pix_normal_img[:,:,2]
 		
 		# convert to RGBA and mask out the image
 		pix_normal_img = cv2.cvtColor(pix_normal_img, cv2.COLOR_RGB2RGBA)
 		pix_normal_img = mask_and_crop(pix_normal_img, mask_img, cfg["mask_region"], cfg["pyxelate"]["factor"])
 
-		pix_normal_img = fix_artifacts(pix_normal_img, mask_img)
 
 		cv2.imwrite(paths["output_norm_path"], pix_normal_img)
 

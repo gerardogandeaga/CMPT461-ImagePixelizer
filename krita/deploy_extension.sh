@@ -37,17 +37,17 @@ pip install -r "$(pwd)/$PROJECT_DEPENDECIES"
 # exit
 deactivate
 
+if [ ! -d "$EXTENSION_NAME/core/xt_consistency/models" ]
+then
+	mkdir "./$EXTENSION_NAME/core/xt_consistency/models"
+	wget -O "./$EXTENSION_NAME/core/xt_consistency/models/rgb2normal_consistency.pth" https://www.dropbox.com/s/6yu48alcava3pcx/rgb2normal_consistency.pth?dl=1
+fi
+
 echo "Copying source code..."
 
 cp -R "$EXTENSION_NAME/" "$EXTENSION_DIR"
 cp "$EXTENSION_NAME.desktop" "$KRITA_RESOURCES_DIR"
 
-
-if [ ! -d "$KRITA_RESOURCES_DIR/$EXTENSION_NAME/core/xt_consistency/models" ]
-then
-	mkdir "$KRITA_RESOURCES_DIR/$EXTENSION_NAME/core/xt_consistency/models"
-	wget -O "$KRITA_RESOURCES_DIR/$EXTENSION_NAME/core/xt_consistency/models/rgb2normal_consistency.pth" https://www.dropbox.com/s/6yu48alcava3pcx/rgb2normal_consistency.pth?dl=1
-fi
 
 # create a path output file for the plugin to read
 echo "$LIB_DIR/lib/$PYTHON/site-packages" > "$EXTENSION_DIR/lib"

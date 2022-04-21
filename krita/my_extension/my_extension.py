@@ -220,9 +220,6 @@ class MyExtension(DockWidget):
         mask = np.zeros((doc_height, doc_width), dtype=np.uint8)
         mask_x, mask_y, mask_width, mask_height = 0, 0, doc_width, doc_height
         if selection == None:
-            # no selection!
-            # self.popup("{} {} {} {} {}".format(selection.x(), selection.y(), doc_width, doc_height, len(pixels)))
-            # take the full image
             mask = mask + 255
         else:
             # get the pixel data from the selection
@@ -250,7 +247,7 @@ class MyExtension(DockWidget):
             palette=input_values["palette"],
             dither=input_values["dither"])
 
-        # fire up the pixelization and normalmap subprocesses
+        # fire up the pixelization and normal map subprocesses
         if generate_normals:
             normal_process = subprocess.Popen([
                 ENGINE_PYTHON_PATH,
@@ -300,6 +297,9 @@ class MyExtension(DockWidget):
             # get byte format
             pix_norm_im_bytes = pix_norm_im_pil.tobytes()
 
+        self.loading_bar.setVisible(False) # set the loading bar to not show
+        self.btn_run_engine.setEnabled(True)
+
         # create the documents with the generated images
         Engine.create_new_documents(
             pix_img=pix_im_bytes, 
@@ -307,8 +307,7 @@ class MyExtension(DockWidget):
             width=pix_width, 
             height=pix_height)
 
-        self.loading_bar.setVisible(False) # set the loading bar to not show
-        self.btn_run_engine.setEnabled(True)
+        Krita.instance().setActiveDocument(active_doc)
 
 
 # And add the extension to Krita's list of extensions:

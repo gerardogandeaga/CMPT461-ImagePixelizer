@@ -1,12 +1,25 @@
+
 # In order to work from any directory, you can use this simple deploy script that deploys the 
 # extension code along with its dependencies to the krita resources library. 
 # THIS SCRIPT MUST BE CALLED FOR EVERY CHANGE TO THE PYTHON CODE!
 
+OS=$1
+
 # Krita location resources directory on mac
 KRITA_RESOURCES_DIR="$HOME/Library/Application Support/krita/pykrita"
+if [ "$OS" == "mac" ]; then
+	KRITA_RESOURCES_DIR="$HOME/Library/Application Support/krita/pykrita"
+fi
+if [ "$OS" == "windows" ]; then
+	KRITA_RESOURCES_DIR="%APPDATA%\krita\pykrita"
+fi
+if [ "$OS" == "linux" ]; then
+	KRITA_RESOURCES_DIR="$HOME/.local/share/krita/pykrita"
+fi
+
 mkdir -p "$KRITA_RESOURCES_DIR" # create the pykrita directory if needed
 
-EXTENSION_NAME="my_extension"
+EXTENSION_NAME="dynapix"
 EXTENSION_DIR="$KRITA_RESOURCES_DIR/$EXTENSION_NAME"
 LIB_DIR="$KRITA_RESOURCES_DIR/deps"
 # TODO: Add to the list of dependencies if needed

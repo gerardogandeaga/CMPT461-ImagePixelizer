@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Service
 ServiceTypes=Krita/PythonPlugin
-X-KDE-Library=my_extension
+X-KDE-Library=dynapix
 X-Python-2-Compatible=false
-Name=My Own Extension
-Comment=Our very own extension.
+Name=DynaPix
+Comment=Image pixelator and normap generator

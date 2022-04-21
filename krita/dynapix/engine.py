@@ -7,13 +7,15 @@ from PIL import Image
 import subprocess
 import json
 
+DYNAPIX = "dynapix"
+
 WORKING_DIR = os.path.join(str(Krita.instance().readSetting("", "ResourceDirectory", "")), "pykrita")
-INPUT_IMAGE_PATH   = os.path.join(WORKING_DIR, "my_extension/INPUT_IMAGE.png")
-INPUT_MASK_PATH   = os.path.join(WORKING_DIR, "my_extension/INPUT_MASK.png")
-OUTPUT_IMAGE_PATH  = os.path.join(WORKING_DIR, "my_extension/OUTPUT_IMAGE.png")
+INPUT_IMAGE_PATH   = os.path.join(WORKING_DIR, DYNAPIX + "/INPUT_IMAGE.png")
+INPUT_MASK_PATH   = os.path.join(WORKING_DIR, DYNAPIX + "/INPUT_MASK.png")
+OUTPUT_IMAGE_PATH  = os.path.join(WORKING_DIR, DYNAPIX + "/OUTPUT_IMAGE.png")
 ENGINE_PYTHON_PATH = os.path.join(WORKING_DIR, "deps/bin/python3.9")
-ENGINE_ENTRY_POINT = os.path.join(WORKING_DIR, "my_extension/core/pixelizer.py")
-CONFIG_PATH = os.path.join(WORKING_DIR, "my_extension/engine.cfg")
+ENGINE_ENTRY_POINT = os.path.join(WORKING_DIR, DYNAPIX + "/core/pixelizer.py")
+CONFIG_PATH = os.path.join(WORKING_DIR, DYNAPIX + "/engine.cfg")
 
 IM_MODE = "RGBA"
 

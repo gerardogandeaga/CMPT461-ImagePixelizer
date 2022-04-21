@@ -1,5 +1,5 @@
 # DynaPix
-DynaPix is build as an extension built for Krita, a free image editing tool used by many artists. Our tool enables artists to quickly create pixel art from high resolution images. Moreover, the tool was created with the aim in specifically aiding pixel artists to create assets for pixel-art based games. Therefore, our extension uses XT-Consistency to generate a normal map from a specified object in an image. The pixelization engine used is Pyxelate.
+DynaPix is an extension built for Krita, a free image editing tool used by many artists. Our tool enables artists to quickly create pixel art from high resolution images. Moreover, the tool was created with the aim of specifically aiding pixel artists to create assets for pixel-art based games. Moreover, our extension uses XT-Consistency to generate a normal map from a specified object in an image. The pixelization engine used is Pyxelate.
 
 XT-Consistency and Pyxelate are open source and freely available projects. Please check them out for more details!
 

@@ -15,6 +15,8 @@ Pyxelate -> https://github.com/sedthh/pyxelate
 
 [![Video](./images/youtube-thumbnail.png)](http://www.youtube.com/watch?v=0bhFTWZGs00 "DynaPix. Pixel art and normal maps generation in Krita.")
 
+Note that the demo video is sped up for convenience, the actual generation can take between 30 seconds to 5 minutes depending on the size of the input image. We suggest to keep your image small at a max of 1500x1500. You can resize your image before running the extension in Krita.
+
 
 ## How to run the project
 
